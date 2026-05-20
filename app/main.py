@@ -7,18 +7,23 @@ import notifier
 import state
 import tz
 
-ORIGIN = os.getenv("ORIGIN", "Montréal, QC")
-DESTINATION = os.getenv("DESTINATION", "Québec City, QC")
-ACTIVE_HOURS_START = int(os.getenv("ACTIVE_HOURS_START", "5"))
-ACTIVE_HOURS_END = int(os.getenv("ACTIVE_HOURS_END", "20"))
-POLL_INTERVAL_MINUTES = int(os.getenv("POLL_INTERVAL_MINUTES", "10"))
-THRESHOLD_OUTBOUND = float(os.getenv("THRESHOLD_OUTBOUND_MINUTES", "90"))
-THRESHOLD_INBOUND = float(os.getenv("THRESHOLD_INBOUND_MINUTES", "90"))
+MORNING_ORIGIN      = os.getenv("MORNING_ORIGIN",      "Montréal, QC")
+MORNING_DESTINATION = os.getenv("MORNING_DESTINATION", "Québec City, QC")
+EVENING_ORIGIN      = os.getenv("EVENING_ORIGIN",      MORNING_DESTINATION)
+EVENING_DESTINATION = os.getenv("EVENING_DESTINATION", MORNING_ORIGIN)
+
+ACTIVE_HOURS_MORNING_START = int(os.getenv("ACTIVE_HOURS_MORNING_START", "5"))
+ACTIVE_HOURS_MORNING_END   = int(os.getenv("ACTIVE_HOURS_MORNING_END",   "20"))
+ACTIVE_HOURS_EVENING_START = int(os.getenv("ACTIVE_HOURS_EVENING_START", "5"))
+ACTIVE_HOURS_EVENING_END   = int(os.getenv("ACTIVE_HOURS_EVENING_END",   "20"))
+
+POLL_INTERVAL_MINUTES  = int(os.getenv("POLL_INTERVAL_MINUTES",   "10"))
+THRESHOLD_MORNING      = float(os.getenv("THRESHOLD_MORNING_MINUTES", "90"))
+THRESHOLD_EVENING      = float(os.getenv("THRESHOLD_EVENING_MINUTES", "90"))
 
 
-def _is_active_hours() -> bool:
-    hour = tz.now().hour
-    return ACTIVE_HOURS_START <= hour < ACTIVE_HOURS_END
+def _active(start: int, end: int) -> bool:
+    return start <= tz.now().hour < end
 
 
 def _classify(average: float | None, threshold: float) -> str:
@@ -27,55 +32,62 @@ def _classify(average: float | None, threshold: float) -> str:
     return state.BELOW if average <= threshold else state.ABOVE
 
 
-async def poll() -> None:
-    print(f"[{tz.now().strftime('%H:%M:%S')}] Polling...")
-    data = await apis.fetch_both_directions()
+async def poll(do_morning: bool, do_evening: bool) -> None:
+    print(f"[{tz.now().strftime('%H:%M:%S')}] Polling... (morning={'✓' if do_morning else '✗'} evening={'✓' if do_evening else '✗'})")
+    data = await apis.fetch_both_trips(do_morning=do_morning, do_evening=do_evening)
 
-    current = state.load()
+    current  = state.load()
+    new_morning = current.get("morning", state.UNKNOWN)
+    new_evening = current.get("evening", state.UNKNOWN)
+    initial_morning = current.get("morning", state.UNKNOWN) == state.UNKNOWN
+    initial_evening = current.get("evening", state.UNKNOWN) == state.UNKNOWN
 
-    outbound_result = data["outbound"]
-    inbound_result = data["inbound"]
+    if do_morning:
+        result = data["morning"]
+        new_morning = _classify(result["average"], THRESHOLD_MORNING)
+        logger.log_result("MORNING", result, THRESHOLD_MORNING, new_morning)
+        if new_morning != current.get("morning", state.UNKNOWN):
+            label = "État initial" if initial_morning else f"{current['morning']} → {new_morning}"
+            print(f"  MORNING {label}")
+            notifier.send("MORNING", result, THRESHOLD_MORNING, new_morning, MORNING_ORIGIN, MORNING_DESTINATION, initial=initial_morning)
+        avg = result["average"]
+        orig = MORNING_ORIGIN.split(',')[0]
+        dest = MORNING_DESTINATION.split(',')[0]
+        print(f"  → {orig}→{dest}: {avg:.1f}min ({new_morning})" if avg else f"  → {orig}→{dest}: No data")
 
-    new_outbound = _classify(outbound_result["average"], THRESHOLD_OUTBOUND)
-    new_inbound = _classify(inbound_result["average"], THRESHOLD_INBOUND)
+    if do_evening:
+        result = data["evening"]
+        new_evening = _classify(result["average"], THRESHOLD_EVENING)
+        logger.log_result("EVENING", result, THRESHOLD_EVENING, new_evening)
+        if new_evening != current.get("evening", state.UNKNOWN):
+            label = "État initial" if initial_evening else f"{current['evening']} → {new_evening}"
+            print(f"  EVENING {label}")
+            notifier.send("EVENING", result, THRESHOLD_EVENING, new_evening, EVENING_ORIGIN, EVENING_DESTINATION, initial=initial_evening)
+        avg = result["average"]
+        orig = EVENING_ORIGIN.split(',')[0]
+        dest = EVENING_DESTINATION.split(',')[0]
+        print(f"  → {orig}→{dest}: {avg:.1f}min ({new_evening})" if avg else f"  → {orig}→{dest}: No data")
 
-    logger.log_result("OUTBOUND", outbound_result, THRESHOLD_OUTBOUND, new_outbound)
-    logger.log_result("INBOUND", inbound_result, THRESHOLD_INBOUND, new_inbound)
-
-    initial_run = current["outbound"] == state.UNKNOWN
-
-    if new_outbound != current["outbound"]:
-        label = "État initial" if initial_run else f"{current['outbound']} → {new_outbound}"
-        print(f"  OUTBOUND {label}")
-        notifier.send("OUTBOUND", outbound_result, THRESHOLD_OUTBOUND, new_outbound, ORIGIN, DESTINATION, initial=initial_run)
-
-    if new_inbound != current["inbound"]:
-        label = "État initial" if initial_run else f"{current['inbound']} → {new_inbound}"
-        print(f"  INBOUND {label}")
-        notifier.send("INBOUND", inbound_result, THRESHOLD_INBOUND, new_inbound, DESTINATION, ORIGIN, initial=initial_run)
-
-    state.save(new_outbound, new_inbound)
-
-    avg_out = outbound_result["average"]
-    avg_in = inbound_result["average"]
-    orig = ORIGIN.split(',')[0]
-    dest = DESTINATION.split(',')[0]
-    print(f"  → {orig}→{dest}: {avg_out:.1f}min ({new_outbound}) | {dest}→{orig}: {avg_in:.1f}min ({new_inbound})" if avg_out and avg_in else "  → No data")
+    state.save(new_morning, new_evening)
 
 
 async def main() -> None:
-    print(f"Travel monitor started — {ORIGIN} ↔ {DESTINATION}")
-    print(f"Active hours: {ACTIVE_HOURS_START}h–{ACTIVE_HOURS_END}h | Poll: {POLL_INTERVAL_MINUTES}min")
-    print(f"Thresholds: outbound={THRESHOLD_OUTBOUND}min, inbound={THRESHOLD_INBOUND}min")
+    print(f"Travel monitor started")
+    print(f"  Matin  : {MORNING_ORIGIN} → {MORNING_DESTINATION} ({ACTIVE_HOURS_MORNING_START}h–{ACTIVE_HOURS_MORNING_END}h, seuil {THRESHOLD_MORNING}min)")
+    print(f"  Soir   : {EVENING_ORIGIN} → {EVENING_DESTINATION} ({ACTIVE_HOURS_EVENING_START}h–{ACTIVE_HOURS_EVENING_END}h, seuil {THRESHOLD_EVENING}min)")
+    print(f"  Poll   : {POLL_INTERVAL_MINUTES}min")
 
     while True:
-        if _is_active_hours():
+        do_morning = _active(ACTIVE_HOURS_MORNING_START, ACTIVE_HOURS_MORNING_END)
+        do_evening = _active(ACTIVE_HOURS_EVENING_START, ACTIVE_HOURS_EVENING_END)
+
+        if do_morning or do_evening:
             try:
-                await poll()
+                await poll(do_morning, do_evening)
             except Exception as e:
                 print(f"[ERROR] {e}")
         else:
-            print(f"[{tz.now().strftime('%H:%M:%S')}] Outside active hours, sleeping...")
+            print(f"[{tz.now().strftime('%H:%M:%S')}] Hors plage horaire, pause...")
 
         await asyncio.sleep(POLL_INTERVAL_MINUTES * 60)
 
