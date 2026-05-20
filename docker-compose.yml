@@ -1,0 +1,8 @@
+services:
+  travel-monitor:
+    build: ./app
+    restart: unless-stopped
+    env_file:
+      - ./config/settings.env
+    volumes:
+      - ./data:/app/../data
