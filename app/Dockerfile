@@ -9,4 +9,5 @@ COPY . .
 
 ENV PYTHONUNBUFFERED=1
 
-CMD ["python", "main.py"]
+# Start both the monitor and the web dashboard
+CMD ["sh", "-c", "uvicorn web.server:app --host 0.0.0.0 --port 8080 & python main.py"]
