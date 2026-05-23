@@ -100,8 +100,11 @@ function renderCharts() {
   const morning = recent.filter(r => r.direction === 'MORNING');
   const evening = recent.filter(r => r.direction === 'EVENING');
 
-  drawTrendChart('chart-morning', morning, 'rgb(79,195,247)', 'MORNING');
-  drawTrendChart('chart-evening', evening, 'rgb(124,77,255)', 'EVENING');
+  // rAF ensures the browser has painted the layout before we measure canvas size
+  requestAnimationFrame(() => {
+    drawTrendChart('chart-morning', morning, 'rgb(79,195,247)', 'MORNING');
+    drawTrendChart('chart-evening', evening, 'rgb(124,77,255)', 'EVENING');
+  });
 }
 
 function drawTrendChart(canvasId, rows, color, direction) {
@@ -111,10 +114,12 @@ function drawTrendChart(canvasId, rows, color, direction) {
 
   const dpr  = window.devicePixelRatio || 1;
   const rect = canvas.parentElement.getBoundingClientRect();
-  canvas.width  = rect.width  * dpr;
-  canvas.height = rect.height * dpr;
+  // Fallback: if layout not ready yet, use offsetWidth or a sensible default
+  const W = rect.width  || canvas.parentElement.offsetWidth  || 320;
+  const H = rect.height || canvas.parentElement.offsetHeight || 150;
+  canvas.width  = W * dpr;
+  canvas.height = H * dpr;
   ctx.scale(dpr, dpr);
-  const W = rect.width, H = rect.height;
   ctx.clearRect(0, 0, W, H);
 
   const vals = rows.map(r => fmtN(r.average_min)).filter(v => v !== null);
