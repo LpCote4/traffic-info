@@ -12,7 +12,7 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 const fmt = v => (v && v !== '') ? parseFloat(v).toFixed(1) + ' min' : '—';
-const fmtN = v => (v && v !== '') ? parseFloat(v).toFixed(1) : null;
+const fmtN = v => (v && v !== '') ? parseFloat(v) : null;  // return number, not string
 
 function stateLabel(s) {
   if (s === 'BELOW_THRESHOLD') return { text: '🟢 Sous le seuil', cls: 'below' };
@@ -29,7 +29,7 @@ function stateCellClass(s) {
 // ── State ───────────────────────────────────────────────────────────────────
 async function loadState() {
   try {
-    const data = await fetch('/api/state').then(r => r.json());
+    const data = await fetch('api/state').then(r => r.json());
     const { text: mt, cls: mc } = stateLabel(data.morning);
     const { text: et, cls: ec } = stateLabel(data.evening);
     document.getElementById('morning-state').textContent = mt;
@@ -48,7 +48,7 @@ let allLogs = [];
 
 async function loadLogs() {
   try {
-    allLogs = await fetch('/api/logs').then(r => r.json());
+    allLogs = await fetch('api/logs').then(r => r.json());
     renderLogs();
     renderLatest();
     renderCharts();
@@ -112,13 +112,14 @@ function drawTrendChart(canvasId, rows, color, direction) {
   if (!canvas) return;
   const ctx = canvas.getContext('2d');
 
-  const dpr  = window.devicePixelRatio || 1;
-  const rect = canvas.parentElement.getBoundingClientRect();
-  // Fallback: if layout not ready yet, use offsetWidth or a sensible default
-  const W = rect.width  || canvas.parentElement.offsetWidth  || 320;
-  const H = rect.height || canvas.parentElement.offsetHeight || 150;
+  const dpr = window.devicePixelRatio || 1;
+  // Set explicit pixel size on canvas to avoid zero-dimension on mobile
+  const W = canvas.parentElement.clientWidth || window.innerWidth - 48;
+  const H = 150;
   canvas.width  = W * dpr;
   canvas.height = H * dpr;
+  canvas.style.width  = W + 'px';
+  canvas.style.height = H + 'px';
   ctx.scale(dpr, dpr);
   ctx.clearRect(0, 0, W, H);
 
@@ -264,7 +265,7 @@ function updateStats(direction, vals, threshold) {
 // ── Settings ─────────────────────────────────────────────────────────────────
 async function loadSettings() {
   try {
-    const data = await fetch('/api/settings').then(r => r.json());
+    const data = await fetch('api/settings').then(r => r.json());
     const form = document.getElementById('settings-form');
     Object.entries(data).forEach(([k, v]) => {
       const el = form.querySelector(`[name="${k}"]`);
@@ -279,7 +280,7 @@ document.getElementById('settings-form').addEventListener('submit', async e => {
   const formData = new FormData(e.target);
   const data     = Object.fromEntries(formData.entries());
   try {
-    const res = await fetch('/api/settings', {
+    const res = await fetch('api/settings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
@@ -308,7 +309,7 @@ document.getElementById('btn-refresh').addEventListener('click', async function 
 // ── Route labels ──────────────────────────────────────────────────────────────
 async function setRouteLabels() {
   try {
-    const s = await fetch('/api/settings').then(r => r.json());
+    const s = await fetch('api/settings').then(r => r.json());
     const short = addr => (addr || '').split(',')[0] || '—';
     document.getElementById('morning-route').textContent =
       `${short(s.MORNING_ORIGIN)} → ${short(s.MORNING_DESTINATION)}`;
